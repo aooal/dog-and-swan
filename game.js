@@ -54,10 +54,39 @@ window.addEventListener('resize', resize);
 
 /* ============ 音效（Web Audio，無外部檔案） ============ */
 let AC = null, muted = false, musicTimer = null, noteI = 0;
+// iPhone 的「靜音開關」會讓網頁音效消失，必須把音訊類別改成「播放」才會有聲音
+try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+let keepAlive = null;
+function silentWavUrl() {   // 舊版 iOS 的備援：播放一段無聲音檔，讓系統把網頁視為媒體播放
+  const n = 8000, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  w(36, 'data'); v.setUint32(40, n, true); new Uint8Array(buf, 44).fill(128);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+function ensureKeepAlive() {
+  if (navigator.audioSession) return;           // 新版 iOS 不需要備援
+  try {
+    if (!keepAlive) {
+      keepAlive = new Audio(silentWavUrl());
+      keepAlive.loop = true; keepAlive.setAttribute('playsinline', '');
+    }
+    if (keepAlive.paused) { const r = keepAlive.play(); if (r && r.catch) r.catch(() => {}); }
+  } catch (e) {}
+}
 function audioInit() {
-  if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; } }
-  if (AC && AC.state === 'suspended') AC.resume();
+  if (!AC) {
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; }
+    if (AC) AC.onstatechange = () => { if (AC.state !== 'running' && !document.hidden) tryResume(); };
+  }
+  tryResume(); ensureKeepAlive();
   if (AC && !musicTimer) musicTimer = setInterval(music, 480);
+}
+function tryResume() {
+  if (!AC || AC.state === 'running') return;
+  try { const r = AC.resume(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
 }
 function tone(f, d, type = 'sine', vol = .12, slide = 0) {
   if (!AC || muted) return;
@@ -83,12 +112,9 @@ const sfx = {
   smash: () => { tone(420, .14, 'square', .07, -200); tone(180, .2, 'triangle', .08, -60); }
 };
 const UNLOCK_EVENTS = ['click', 'touchend', 'pointerup', 'keydown'];
-function unlockAudio() {
+function unlockAudio() {          // 每次碰畫面都檢查一次：從別的 App 回來後，這裡會把音樂接回來
   audioInit();
-  if (AC && AC.state === 'running') {
-    document.body.classList.add('audio-on');
-    UNLOCK_EVENTS.forEach(ev => document.removeEventListener(ev, unlockAudio, true));
-  }
+  if (AC && AC.state === 'running') document.body.classList.add('audio-on');
 }
 UNLOCK_EVENTS.forEach(ev => document.addEventListener(ev, unlockAudio, true));
 $('mute').addEventListener('click', e => {
@@ -162,6 +188,10 @@ function beginTravel(from, to, isFinal) {
 }
 function onGoal() { sfx.win(); beginTravel(stage, stage + 1, false); }
 
+function lockBtn(btn, ms) {      // 剛出現的畫面，按鈕先鎖一下，避免玩遊戲時狂點的手指誤觸
+  btn.disabled = true;
+  setTimeout(() => { btn.disabled = false; }, ms);
+}
 function showCard(i) {
   const m = MEM[i];
   $('cardTitle').textContent = m.title;
@@ -176,6 +206,7 @@ function showCard(i) {
     img.src = m.photo; ph.appendChild(img);
   } else ph.innerHTML = empty;
   $('cardBtn').textContent = i < N - 1 ? '繼續飛行 ✈' : '前往終點 ♥';
+  lockBtn($('cardBtn'), 1500);
   show($('card'));
 }
 function showLetter() {
@@ -190,6 +221,7 @@ function showLetter() {
   $('letterTitle').textContent = CFG.finale.title;
   $('letterText').textContent = CFG.finale.text;
   $('letterFrom').textContent = '— ' + (CFG.fromName || '');
+  lockBtn($('btnAgain'), 1500);
   show($('letter'));
 }
 
@@ -197,7 +229,8 @@ function refreshTitle() {
   const s = unlocked;
   $('btnStart').classList.toggle('hidden', s > 0);
   $('btnContinue').classList.toggle('hidden', s === 0);
-  $('btnContinue').textContent = s >= N ? '再看一次最後的信' : '繼續旅程';
+  const pend = Number.isInteger(loadSave().pending);
+  $('btnContinue').textContent = s >= N && !pend ? '再看一次最後的信' : '繼續旅程';
   $('btnRestart').classList.toggle('hidden', s === 0);
 }
 function toTitle() {
@@ -210,6 +243,10 @@ $('btnStart').onclick = () => { audioInit(); fresh(); };
 $('btnRestart').onclick = () => { audioInit(); fresh(); };
 $('btnContinue').onclick = () => {
   audioInit();
+  const sv = loadSave();
+  if (Number.isInteger(sv.pending) && sv.pending >= 0 && sv.pending < N) {   // 上次停在某張回憶卡片
+    stage = sv.pending; reached = stage + 1; hide($('title')); state = 'card'; showCard(stage); return;
+  }
   if (unlocked >= N) { reached = N + 1; $('title').classList.add('hidden'); showLetter(); }
   else { stage = unlocked; reached = unlocked; startFlight(); }
 };
@@ -223,6 +260,7 @@ function pauseGame() {
 }
 function resumeGame() {
   if (state !== 'paused') return;
+  audioInit();
   state = pausedFrom; hide($('pauseMenu'));
 }
 function quitGame() {
@@ -237,9 +275,15 @@ $('btnQuit').onclick = quitGame;
 window.addEventListener('keydown', e => {
   if (e.code === 'Escape' || e.code === 'KeyP') { state === 'paused' ? resumeGame() : pauseGame(); }
 });
-document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) pauseGame();
+  else { tryResume(); ensureKeepAlive(); }
+});
+window.addEventListener('pageshow', () => { tryResume(); ensureKeepAlive(); });
+window.addEventListener('focus', () => { tryResume(); });
 $('btnAgain').onclick = () => { toTitle(); };
 $('cardBtn').onclick = () => {
+  writeSave({ done: unlocked });
   hide($('card'));
   if (stage < N - 1) { stage++; startFlight(); }
   else beginTravel(N, N + 1, true);
@@ -347,7 +391,7 @@ function update(dt) {
       if (touch && P.inv <= 0) {
         lives--; P.inv = 1.6; P.vy = -230; shake = .3; sfx.hit();
         burst(P.x, P.y - 10, 10, 'puff', '#9aa0c0');
-        if (lives <= 0) { state = 'over'; show($('over')); }
+        if (lives <= 0) { state = 'over'; lockBtn($('btnRetry'), 900); show($('over')); }
       }
       if (c.x < -90) clouds.splice(i, 1);
     }
@@ -364,7 +408,7 @@ function update(dt) {
       if (finalTravel) { unlocked = N; writeSave({ done: N }); showLetter(); }
       else {
         state = 'card'; unlocked = Math.max(unlocked, stage + 1);
-        writeSave({ done: unlocked }); showCard(stage);
+        writeSave({ done: unlocked, pending: stage }); showCard(stage);
       }
     }
   }
