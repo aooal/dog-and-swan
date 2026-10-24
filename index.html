@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#ffb98a">
+<title>小狗騎天鵝</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <button id="mute" aria-label="音效開關">🔊</button>
+
+  <!-- 標題畫面 -->
+  <section id="title" class="overlay between">
+    <div class="titlebox">
+      <p class="to">給 <span id="toName"></span></p>
+      <h1>小狗騎天鵝</h1>
+      <p class="sub">一趟只屬於我們的小旅程</p>
+      <p class="hint">輕觸螢幕，開啟音樂 ♪</p>
+    </div>
+    <div class="btns">
+      <button id="btnStart" class="btn">開始旅程</button>
+      <button id="btnContinue" class="btn hidden">繼續旅程</button>
+      <button id="btnRestart" class="btn ghost hidden">重新開始</button>
+    </div>
+  </section>
+
+  <!-- 回憶卡片 -->
+  <section id="card" class="overlay dim hidden">
+    <div class="panel">
+      <div id="cardPhoto" class="photo"></div>
+      <p id="cardDate" class="date"></p>
+      <h2 id="cardTitle"></h2>
+      <p id="cardText" class="body"></p>
+      <button id="cardBtn" class="btn">繼續</button>
+    </div>
+  </section>
+
+  <!-- 失敗（溫柔版） -->
+  <section id="over" class="overlay dim hidden">
+    <div class="panel small">
+      <h2>哎呀，小狗頭暈暈的…</h2>
+      <p class="body">沒關係，我們再飛一次！</p>
+      <button id="btnRetry" class="btn">再飛一次</button>
+    </div>
+  </section>
+
+  <!-- 最後的信 -->
+  <section id="letter" class="overlay dim hidden">
+    <div class="panel paper">
+      <div id="letterPhoto" class="photo hidden"></div>
+      <h2 id="letterTitle"></h2>
+      <p id="letterText" class="body"></p>
+      <p id="letterFrom" class="from"></p>
+      <button id="btnAgain" class="btn ghost">再玩一次</button>
+    </div>
+  </section>
+</div>
+
+<script src="memories.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
