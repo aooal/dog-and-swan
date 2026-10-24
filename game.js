@@ -101,6 +101,21 @@ function music() {
   if (document.hidden) return;
   tone(SCALE[noteI++ % SCALE.length], 1.1, 'sine', .06);
 }
+let rainNode = null;
+function setRain(v) {
+  if (!AC || (!rainNode && v <= 0)) return;
+  if (!rainNode) {
+    const len = AC.sampleRate * 2, buf = AC.createBuffer(1, len, AC.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = AC.createBufferSource(); src.buffer = buf; src.loop = true;
+    const hp = AC.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 900;
+    const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6500;
+    const gn = AC.createGain(); gn.gain.value = 0;
+    src.connect(hp); hp.connect(lp); lp.connect(gn); gn.connect(AC.destination); src.start();
+    rainNode = gn;
+  }
+  rainNode.gain.setTargetAtTime(muted ? 0 : v, AC.currentTime, .3);
+}
 const sfx = {
   flap: () => tone(360, .12, 'triangle', .07, 220),
   heart: () => { tone(784, .12, 'sine', .14); setTimeout(() => tone(1175, .18, 'sine', .12), 70); },
@@ -153,13 +168,54 @@ const PU = {
   shield: { name: '無敵', color: '#f7c531', dur: 6 }
 };
 const pBanner = { t: 0, text: '', color: '#fff' };
+
+/* ===== 天氣：下雨（翅膀變重）／起霧（看不清烏雲）／彩虹（愛心算兩顆），各持續 5~8 秒，結束後恢復 ===== */
+const W8 = { type: 'clear', phase: 'idle', t: 0, dur: 0, k: 0 };   // phase: idle warn active fade；k = 畫面強度 0~1
+const wBanner = { t: 0, main: '', sub: '', color: '#fff' };
+const WINFO = {
+  rain:    { name: '下雨', main: '下雨了…', sub: '翅膀濕了，每次拍翅膀的力道變小', color: '#6f93c8' },
+  fog:     { name: '起霧', main: '起霧了…', sub: '烏雲要靠近才看得到，愛心會發光', color: '#9aa9bd' },
+  rainbow: { name: '彩虹', main: '彩虹出現！', sub: '這段時間每顆愛心算兩顆', color: '#ff82b2' }
+};
+let weatherCD = 8, forceRainbow = false, dropT = 0;
+const raindrops = Array.from({ length: 80 }, () => ({ x: rand(0, W + 60), y: rand(0, 700), v: rand(520, 760), l: rand(10, 20) }));
+const wx = () => (W8.phase === 'active' ? W8.type : null);   // 只有「作用中」才會影響玩法
+const heartGap = () => (wx() === 'rainbow' ? .1 : rand(.4, .9));
+function resetWeather() { W8.type = 'clear'; W8.phase = 'idle'; W8.k = 0; W8.t = 0; wBanner.t = 0; weatherCD = rand(7, 10); forceRainbow = false; }
+function startWeather(type) {
+  W8.type = type; W8.phase = 'warn'; W8.t = 1.2; W8.dur = rand(5, 8); W8.k = 0;
+  const i = WINFO[type]; wBanner.t = 2.8; wBanner.main = i.main; wBanner.sub = i.sub; wBanner.color = i.color;
+}
+function pickWeather() {
+  if (forceRainbow) { forceRainbow = false; return 'rainbow'; }
+  const r = Math.random();
+  return r < .4 ? 'rain' : r < .7 ? 'fog' : 'rainbow';
+}
+function updateWeather(dt) {
+  if (W8.phase === 'idle') { weatherCD -= dt; if (weatherCD <= 0) startWeather(pickWeather()); return; }
+  W8.t -= dt;
+  if (W8.phase === 'warn') {
+    W8.k = clamp(1 - W8.t / 1.2, 0, 1);
+    if (W8.t <= 0) { W8.phase = 'active'; W8.t = W8.dur; W8.k = 1; }
+  } else if (W8.phase === 'active') {
+    if (W8.t <= 0) { W8.phase = 'fade'; W8.t = 1.2; }
+  } else if (W8.phase === 'fade') {
+    W8.k = clamp(W8.t / 1.2, 0, 1);
+    if (W8.t <= 0) {
+      const was = W8.type;
+      W8.type = 'clear'; W8.phase = 'idle'; W8.k = 0;
+      forceRainbow = was === 'rain' && Math.random() < .7;   // 雨過天晴，常常會接著出現彩虹
+      weatherCD = forceRainbow ? .8 : rand(9, 15);
+    }
+  }
+}
 const P = { x: 112, y: 300, vy: 0, t: 0, flap: 0, inv: 0 };
 const items = [], clouds = [], particles = [];
 
 const speedNow = () => Math.min(200, 140 + 12 * stage);
 
 /* ============ 輸入 ============ */
-function flap() { P.vy = -420; P.flap = .32; sfx.flap(); }
+function flap() { P.vy = wx() === 'rain' ? -360 : -420; P.flap = .32; sfx.flap(); }
 function tap() {
   audioInit();
   if (state === 'ready') { state = 'play'; flap(); }
@@ -177,13 +233,13 @@ function startFlight() {
   hearts = 0; lives = 3; items.length = 0; clouds.length = 0;
   P.y = H * .42; P.vy = 0; P.inv = 0; P.flap = 0;
   heartDelay = .6; cloudT = 1.6; powerT = rand(6, 9); boneT = 12;
-  fx.speed = fx.slow = fx.shield = 0; pBanner.t = 0;
+  fx.speed = fx.slow = fx.shield = 0; pBanner.t = 0; resetWeather();
   bannerT = 2.4; state = 'ready';
   ['title', 'card', 'over', 'letter'].forEach(id => hide($(id)));
 }
 function beginTravel(from, to, isFinal) {
   state = 'travel'; travelFrom = from; travelTo = to; travelT = 0; finalTravel = isFinal;
-  items.length = 0; clouds.length = 0;
+  items.length = 0; clouds.length = 0; resetWeather();
   reached = from;
 }
 function onGoal() { sfx.win(); beginTravel(stage, stage + 1, false); }
@@ -328,7 +384,7 @@ function burst(x, y, n, type, color) {
 function hitTest(a, b, r) { return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 < r * r; }
 
 function update(dt) {
-  if (state === 'paused') return;
+  if (state === 'paused') { setRain(0); return; }
   clock += dt;
   const sp = state === 'play' ? speedNow() * (fx.speed > 0 ? 1.6 : fx.slow > 0 ? .55 : 1) : (state === 'ready' ? 50 : 30);
   scroll += sp * dt;
@@ -338,6 +394,9 @@ function update(dt) {
   if (P.inv > 0) P.inv -= dt;
   if (shake > 0) shake -= dt;
   if (pBanner.t > 0) pBanner.t -= dt;
+  if (wBanner.t > 0) wBanner.t -= dt;
+  if (W8.k > 0 && W8.type === 'rain') raindrops.forEach(d => { d.y += d.v * dt; d.x -= 70 * dt; if (d.y > H + 20) { d.y = -20; d.x = rand(0, W + 80); } });
+  setRain(state === 'play' && W8.type === 'rain' ? .07 * W8.k : 0);
 
   if (state === 'ready') {
     P.y = H * .42 + Math.sin(P.t * 3) * 8; P.vy = 0;
@@ -345,12 +404,17 @@ function update(dt) {
   }
   if (state === 'play') {
     if (bannerT > 0) bannerT -= dt;
-    P.vy = Math.min(P.vy + 1500 * dt, 620);
+    P.vy = Math.min(P.vy + (wx() === 'rain' ? 1650 : 1500) * dt, 620);
     P.y += P.vy * dt;
     if (P.y < 80) { P.y = 80; P.vy = Math.max(P.vy, 0); }
     if (P.y > H - 95) { P.y = H - 95; P.vy = -380; sfx.bounce(); }
 
     for (const k in fx) if (fx[k] > 0) fx[k] -= dt;
+    updateWeather(dt);
+    if (wx() === 'rain') {     // 翅膀滴水
+      dropT -= dt;
+      if (dropT <= 0) { dropT = .07; particles.push({ x: P.x + rand(-40, 50), y: P.y + rand(-10, 25), vx: rand(-20, 20), vy: rand(20, 80), life: 0, max: .6, size: rand(2, 3.5), type: 'spark', color: '#8ec5ff' }); }
+    }
     if (!items.some(it => it.type === 'heart')) { heartDelay -= dt; if (heartDelay <= 0) spawnHeart(); }
     cloudT -= dt; if (cloudT <= 0) { spawnCloud(); cloudT = Math.max(.9, rand(1.4, 2.0) - stage * .1); }
     powerT -= dt; if (powerT <= 0) { spawnPower(); powerT = rand(9, 14); }
@@ -368,7 +432,7 @@ function update(dt) {
       if (hitTest(body, it, r) || hitTest(head, it, r - 8)) {
         items.splice(i, 1);
         if (it.type === 'heart') {
-          hearts++; heartDelay = rand(.4, .9); sfx.heart(); burst(it.x, it.y, 8, 'heart', '#ff6f91');
+          hearts += wx() === 'rainbow' ? 2 : 1; heartDelay = heartGap(); sfx.heart(); burst(it.x, it.y, 8, 'heart', '#ff6f91');
           if (hearts >= goalFor(stage)) { onGoal(); return; }
         } else if (it.type === 'bone') {
           lives = Math.min(3, lives + 1); sfx.bone(); burst(it.x, it.y, 10, 'spark', '#ffd36b');
@@ -377,7 +441,7 @@ function update(dt) {
         }
       } else if (it.type === 'heart' ? it.x < P.x - 60 : it.x < -60) {
         items.splice(i, 1);
-        if (it.type === 'heart') heartDelay = rand(.4, .9);
+        if (it.type === 'heart') heartDelay = heartGap();
       }
     }
     for (let i = clouds.length - 1; i >= 0; i--) {
@@ -567,10 +631,19 @@ function drawScene() {
     });
   });
   ctx.globalAlpha = 1;
+  // 彩虹
+  if (W8.type === 'rainbow' && W8.k > 0) {
+    ctx.save(); ctx.globalAlpha = .5 * W8.k; ctx.lineWidth = 11;
+    ['#ff6b6b', '#ffa94d', '#ffe066', '#8ce99a', '#74c0fc', '#8c7ae6', '#d6a2e8'].forEach((c, i) => {
+      ctx.beginPath(); ctx.arc(W * .42, H - 110, 310 - i * 11, Math.PI, 0); ctx.strokeStyle = c; ctx.stroke();
+    });
+    ctx.restore();
+  }
   // 丘陵
   const far = rgbLerp(HILL_DAY[0], HILL_NIGHT[0], night), near = rgbLerp(HILL_DAY[1], HILL_NIGHT[1], night);
   hill(H - 150, 26, .012, .25, far);
   hill(H - 82, 20, .018, .6, near);
+  if (W8.type === 'rain' && W8.k > 0) { ctx.fillStyle = `rgba(35,50,90,${.3 * W8.k})`; ctx.fillRect(0, 0, W, H); }   // 雨天天色變暗
 }
 function hill(base, amp, freq, sf, col) {
   ctx.beginPath(); ctx.moveTo(0, H);
@@ -624,6 +697,31 @@ function drawPower(x, y, kind, t) {
   ctx.restore();
   label(PU[kind].name, x, y + r + 14, 12, '#fff', 'center', '800', col);
 }
+function drawFog(k) {
+  const g = ctx.createLinearGradient(P.x, 0, W, 0);
+  g.addColorStop(0, 'rgba(238,242,250,0)'); g.addColorStop(.35, `rgba(238,242,250,${.3 * k})`); g.addColorStop(1, `rgba(238,242,250,${.6 * k})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  for (let i = 0; i < 5; i++) {
+    const x = ((i * 130 - clock * 14) % (W + 260) + W + 260) % (W + 260) - 130, y = 140 + i * 105;
+    const rg = ctx.createRadialGradient(x, y, 10, x, y, 120);
+    rg.addColorStop(0, `rgba(245,248,255,${.35 * k})`); rg.addColorStop(1, 'rgba(245,248,255,0)');
+    ctx.fillStyle = rg; ctx.fillRect(x - 120, y - 120, 240, 240);
+  }
+  items.forEach(it => {      // 愛心與道具在霧裡會發光，才找得到
+    if (it.type === 'heart') {
+      const y = it.y + Math.sin(clock * 4 + it.ph) * 4, hg = ctx.createRadialGradient(it.x, y, 4, it.x, y, 42);
+      hg.addColorStop(0, `rgba(255,255,255,${.9 * k})`); hg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(it.x, y, 42, 0, 7); ctx.fill();
+      drawHeart(it.x, y, 15 + Math.sin(clock * 6 + it.ph) * 1.2, '#ff5f84');
+    } else if (it.type === 'pu') drawPower(it.x, it.y + Math.sin(clock * 4 + it.ph) * 4, it.kind, clock);
+  });
+}
+function drawRain(k) {
+  ctx.strokeStyle = `rgba(205,228,255,${.55 * k})`; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+  ctx.beginPath();
+  raindrops.forEach(d => { ctx.moveTo(d.x, d.y); ctx.lineTo(d.x + d.l * .22, d.y - d.l); });
+  ctx.stroke();
+}
 function drawParticles() {
   particles.forEach(q => {
     const a = 1 - q.life / q.max;
@@ -655,6 +753,12 @@ function drawHUD() {
     label(PU[k].name, x + w / 2, py + 8.5, 11, '#fff', 'center', '800', 'rgba(0,0,0,.3)');
     py += 22;
   });
+  if (W8.phase === 'active') {
+    const wi = WINFO[W8.type], w = 110, x = W / 2 - w / 2 + 6;
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.roundRect(x, py, w, 16, 8); ctx.fill();
+    ctx.fillStyle = wi.color; ctx.beginPath(); ctx.roundRect(x, py, Math.max(16, w * W8.t / W8.dur), 16, 8); ctx.fill();
+    label(wi.name, x + w / 2, py + 8.5, 11, '#fff', 'center', '800', 'rgba(0,0,0,.3)');
+  }
 }
 
 /* ============ 繪圖：旅程地圖 ============ */
@@ -754,7 +858,12 @@ function render() {
     else if (it.type === 'bone') drawBone(it.x, it.y + bob, clock);
     else drawPower(it.x, it.y + bob, it.kind, clock);
   });
-  clouds.forEach(drawCloud);
+  const fog = W8.type === 'fog' ? W8.k : 0;
+  clouds.forEach(c => {
+    ctx.globalAlpha = fog > 0 ? lerp(1, clamp(1 - (c.x - P.x - 40) / 220, .08, 1), fog) : 1;
+    drawCloud(c); ctx.globalAlpha = 1;
+  });
+  if (fog > 0) drawFog(fog);
   drawParticles();
   const blink = P.inv > 0 && Math.floor(P.inv * 12) % 2 === 0;
   if (blink) ctx.globalAlpha = .4;
@@ -774,7 +883,14 @@ function render() {
     }
   }
   if (fx.slow > 0) { ctx.fillStyle = 'rgba(110,170,255,.14)'; ctx.fillRect(0, 0, W, H); }
+  if (W8.type === 'rain' && W8.k > 0) drawRain(W8.k);
   drawHUD();
+  if (wBanner.t > 0) {
+    ctx.globalAlpha = clamp(wBanner.t, 0, 1);
+    label(wBanner.main, W / 2, 255, 30, '#fff', 'center', '800', wBanner.color);
+    label(wBanner.sub, W / 2, 288, 13, '#fff', 'center', '700', wBanner.color);
+    ctx.globalAlpha = 1;
+  }
   if (pBanner.t > 0) {
     ctx.globalAlpha = clamp(pBanner.t, 0, 1);
     label(pBanner.text, W / 2, 190, 34, '#fff', 'center', '800', pBanner.color);
@@ -813,7 +929,7 @@ if (location.search.includes('debug')) {
     get stage() { return stage; },
     setHearts(n) { hearts = n; }, setStage(n) { stage = n; },
     goal() { onGoal(); }, protect() { lives = 99; },
-    power(k) { applyPower(k); }, pause() { pauseGame(); }, resume() { resumeGame(); }, spawnPower() { spawnPower(); }, get items() { return items.map(i => ({ type: i.type, x: i.x, y: i.y })); }, get P() { return { y: P.y, vy: P.vy }; }, get fx() { return { ...fx }; }
+    power(k) { applyPower(k); }, weather(t) { startWeather(t); }, get W8() { return { ...W8 }; }, pause() { pauseGame(); }, resume() { resumeGame(); }, spawnPower() { spawnPower(); }, get items() { return items.map(i => ({ type: i.type, x: i.x, y: i.y })); }, get P() { return { y: P.y, vy: P.vy }; }, get fx() { return { ...fx }; }
   };
 }
 })();
