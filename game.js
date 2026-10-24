@@ -214,6 +214,30 @@ $('btnContinue').onclick = () => {
   else { stage = unlocked; reached = unlocked; startFlight(); }
 };
 $('btnRetry').onclick = () => { startFlight(); };
+
+/* 暫停 / 結束 */
+let pausedFrom = 'play';
+function pauseGame() {
+  if (state !== 'play' && state !== 'ready') return;
+  pausedFrom = state; state = 'paused'; show($('pauseMenu'));
+}
+function resumeGame() {
+  if (state !== 'paused') return;
+  state = pausedFrom; hide($('pauseMenu'));
+}
+function quitGame() {
+  hide($('pauseMenu'));
+  items.length = 0; clouds.length = 0; particles.length = 0;
+  fx.speed = fx.slow = fx.shield = 0;
+  toTitle();
+}
+$('pause').addEventListener('click', e => { e.stopPropagation(); audioInit(); pauseGame(); });
+$('btnResume').onclick = resumeGame;
+$('btnQuit').onclick = quitGame;
+window.addEventListener('keydown', e => {
+  if (e.code === 'Escape' || e.code === 'KeyP') { state === 'paused' ? resumeGame() : pauseGame(); }
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
 $('btnAgain').onclick = () => { toTitle(); };
 $('cardBtn').onclick = () => {
   hide($('card'));
@@ -260,6 +284,7 @@ function burst(x, y, n, type, color) {
 function hitTest(a, b, r) { return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 < r * r; }
 
 function update(dt) {
+  if (state === 'paused') return;
   clock += dt;
   const sp = state === 'play' ? speedNow() * (fx.speed > 0 ? 1.6 : fx.slow > 0 ? .55 : 1) : (state === 'ready' ? 50 : 30);
   scroll += sp * dt;
@@ -729,6 +754,8 @@ let last = performance.now();
 function loop(now) {
   const dt = Math.min(.033, (now - last) / 1000); last = now;
   update(dt); render();
+  const showPause = state === 'ready' || state === 'play';
+  if (showPause === $('pause').classList.contains('hidden')) $('pause').classList.toggle('hidden', !showPause);
   requestAnimationFrame(loop);
 }
 resize();
@@ -742,7 +769,7 @@ if (location.search.includes('debug')) {
     get stage() { return stage; },
     setHearts(n) { hearts = n; }, setStage(n) { stage = n; },
     goal() { onGoal(); }, protect() { lives = 99; },
-    power(k) { applyPower(k); }, spawnPower() { spawnPower(); }, get items() { return items.map(i => ({ type: i.type, x: i.x, y: i.y })); }, get P() { return { y: P.y, vy: P.vy }; }, get fx() { return { ...fx }; }
+    power(k) { applyPower(k); }, pause() { pauseGame(); }, resume() { resumeGame(); }, spawnPower() { spawnPower(); }, get items() { return items.map(i => ({ type: i.type, x: i.x, y: i.y })); }, get P() { return { y: P.y, vy: P.vy }; }, get fx() { return { ...fx }; }
   };
 }
 })();

@@ -11,6 +11,7 @@
 <div id="stage">
   <canvas id="c"></canvas>
   <button id="mute" aria-label="音效開關">🔊</button>
+  <button id="pause" class="hidden" aria-label="暫停">⏸</button>
 
   <!-- 標題畫面 -->
   <section id="title" class="overlay between">
@@ -35,6 +36,17 @@
       <h2 id="cardTitle"></h2>
       <p id="cardText" class="body"></p>
       <button id="cardBtn" class="btn">繼續</button>
+    </div>
+  </section>
+
+  <!-- 暫停選單 -->
+  <section id="pauseMenu" class="overlay dim hidden">
+    <div class="panel small">
+      <h2>暫停中 ☁</h2>
+      <p class="body">休息一下，準備好了再繼續飛吧。</p>
+      <button id="btnResume" class="btn">繼續遊戲</button>
+      <button id="btnQuit" class="btn ghost quit">結束遊戲</button>
+      <p class="note">結束後會回到首頁，已解鎖的回憶會保留，這一站的進度需要重飛。</p>
     </div>
   </section>
 
